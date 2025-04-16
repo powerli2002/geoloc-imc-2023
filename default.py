@@ -25,7 +25,7 @@ REPRO_GENERATED_PATH: Path = REPRO_PATH / "generated/"
 
 REPRO_ANCHORS_FILE: Path = REPRO_ATLAS_PATH / "reproducibility_anchors.json"
 REPRO_PROBES_FILE: Path = REPRO_ATLAS_PATH / "reproducibility_probes.json"
-REPRO_PROBES_AND_ANCHORS_FILE: Path = (
+REPRO_PROBES_AND_ANCHORS_FILE: Path = (   
     REPRO_ATLAS_PATH / "reproducibility_probes_and_anchors.json"
 )
 

@@ -29,6 +29,8 @@ from default import (
     BGP_PRIFIXES_FILE,
 )
 
+from default import *
+
 ########## MILLION SCALE ##########
 
 
@@ -39,35 +41,63 @@ def compute_closest_rtt_probes(
     is_prefix,
     n_shortest=10,
 ):
+    """
+    计算每个目的地址或前缀的最短RTT（Round Trip Time）探测点。
+
+    本函数根据给定的目的地址或前缀，以及探测点的RTT信息，找出每个目的地址或前缀的
+    最短RTT探测点，并检查这些探测点是否满足互联网速度的理论限制。
+
+    :param rtts_per_dst_prefix: 字典，包含每个目的地址或前缀及其对应的源-最小RTT映射。
+    :param vp_coordinates_per_ip: 字典，包含每个虚拟探测点（VP）的坐标信息。
+    :param vp_distance_matrix: 字典，包含每个VP之间的距离矩阵。
+    :param is_prefix: 布尔值，指示是否使用前缀作为目的地址。
+    :param n_shortest: 整数，要返回的最短RTT探测点数量，默认为10。
+    :return: 字典，包含每个目的地址或前缀及其对应的最短RTT探测点。
+    """
+    # 初始化用于存储每个目的地址或前缀的最短RTT探测点的字典
     vps_per_prefix = {}
     for dst, src_min_rtt in rtts_per_dst_prefix.items():
+        # 如果不是前缀查询，且目的地址不在VP坐标字典中，则跳过当前迭代
         if not is_prefix:
             if dst not in vp_coordinates_per_ip:
                 continue
+        # 对每个目的地址或前缀的源-最小RTT映射进行排序
         sorted_probes = sorted(src_min_rtt.items(), key=lambda x: x[1][0])
 
+        # 获取排序后的前n_shortest个最短RTT探测点
         n_shortest_probes = dict(sorted_probes[:n_shortest])
-        # Check if the shortest probes respect the speed of Internet
+        # 初始化用于存储经过距离检查的最短RTT探测点的字典
         n_shortest_probes_checked = {}
+        # 初始化最小RTT和对应探测点变量
         min_rtt_probe, min_rtt = None, 1000
+        # 如果不是前缀查询，对每个探测点进行距离检查
         if not is_prefix:
             for probe, rtts in n_shortest_probes.items():
                 min_rtt_probe = min(rtts)
+                # 如果探测点不在目的地址的VP距离矩阵中，则跳过当前探测点
                 if probe not in vp_distance_matrix[dst]:
                     continue
+                # 计算理论上的最大距离
                 max_theoretical_distance = (
                     SPEED_OF_INTERNET * min_rtt_probe / 1000
                 ) / 2
+                # 如果实际距离大于理论上的最大距离，则认为距离不合理
                 if vp_distance_matrix[dst][probe] > max_theoretical_distance:
                     # Impossible distance
                     continue
+                # 将合理的探测点添加到经过检查的探测点字典中
                 n_shortest_probes_checked[probe] = n_shortest_probes[probe]
         else:
+            # 如果是前缀查询，直接使用未检查的最短RTT探测点
             n_shortest_probes_checked = n_shortest_probes
 
+        # 将每个目的地址或前缀的最短RTT探测点添加到最终结果字典中
         vps_per_prefix[dst] = n_shortest_probes_checked
 
+    # 返回包含每个目的地址或前缀的最短RTT探测点的字典
     return vps_per_prefix
+
+
 
 
 def compute_geolocation_features_per_ip_impl(
@@ -108,7 +138,8 @@ def compute_geolocation_features_per_ip_impl(
             vp_coordinates_per_ip_filter = {
                 vp: vp_coordinates_per_ip[vp]
                 for vp in vp_coordinates_per_ip
-                if (
+                if(
+                    vp in vp_distance_matrix_dst and 
                     vp_distance_matrix_dst[vp] > threshold_distance
                     and vp in vp_per_target_allowed
                 )
@@ -120,6 +151,7 @@ def compute_geolocation_features_per_ip_impl(
                 vp: vp_coordinates_per_ip[vp]
                 for vp in vp_coordinates_per_ip
                 if (
+                    vp in vp_distance_matrix_dst and 
                     vp_distance_matrix_dst[vp] <= threshold_distance
                     and vp in vp_per_target_allowed
                 )
@@ -138,8 +170,8 @@ def compute_geolocation_features_per_ip_impl(
             )
             vp_coordinates_per_ip_filter_sample[dst] = vp_coordinates_per_ip_filter[dst]
         else:
-            vp_coordinates_per_ip_filter_sample = vp_coordinates_per_ip_filter
-
+            vp_coordinates_per_ip_filter_sample = vp_coordinates_per_ip_filter # 取出所有能用的VP(经过过滤，挑选(>0/40/100km),等))
+        # 传入，目的ip，ip周围的vp:经纬度，ip周围vp的rtt
         error, circles = compute_error(
             dst, vp_coordinates_per_ip_filter_sample, rtt_per_src
         )
@@ -157,7 +189,7 @@ def compute_geolocation_features_per_ip(
     max_vps,
     is_use_prefix,
     vp_distance_matrix,
-    is_multiprocess=True,
+    is_multiprocess=False,
 ):
     """
     Compute some features to get some scatter plots in functions of the accuracy
@@ -167,6 +199,8 @@ def compute_geolocation_features_per_ip(
     """
     features = {}
     args = []
+    # 遍历 rtt_per_srcs_dst 中的每个目标 IP 地址及其对应的 RTT 数据，
+    # 检查目标 IP 是否在 vp_coordinates_per_ip 中，如果不在则跳过。
     for dst, rtt_per_src in sorted(rtt_per_srcs_dst.items()):
         if dst not in vp_coordinates_per_ip:
             # We do not know the geolocation of the anchor.
@@ -276,6 +310,8 @@ def compute_accuracy_vs_number_of_vps(
 
 def compute_rtts_per_dst_src(table, filter, threshold, is_per_prefix=False):
     """
+    从数据库中获取每对源（src）和目的（dst）节点的最小往返时间（RTT），
+    并且返回一个字典结构，其中包含了从每个目的节点到各个源节点的最小RTT值。
     Compute the guessed geolocation of the targets
     """
     clickhouse_wrapper = Clickhouse(
@@ -306,7 +342,49 @@ def compute_rtts_per_dst_src(table, filter, threshold, is_per_prefix=False):
     return rtt_per_srcs_dst
 
 
+
+def compute_rtts_per_dst_src_with_csv(csv_path, filter=None, threshold=None, is_per_prefix=False):
+    import csv
+    """
+    csv结构：
+    src,dst,prb_id,min_rtt
+    100.33.80.250,107.172.196.228,0,17.2
+    从csv文件中获取每对源（src）和目的（dst）节点的最小往返时间（RTT），
+    并且返回一个字典结构，其中包含了从每个目的节点到各个源节点的最小RTT值。
+    """
+    rtt_per_srcs_dst = {}
+    csv_path = "/home/lzj/geoloc-imc-2023/Geo_mycode/data/generate/ping_to_anchors.csv"
+
+    with open(csv_path, mode='r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            src = row['src']
+            dst = row['dst']
+            min_rtt = float(row['min_rtt'])
+
+            # # 应用过滤条件和阈值
+            # if filter and not filter(src, dst):
+            #     continue
+            # if threshold and min_rtt > threshold:
+            #     continue
+
+            rtt_per_srcs_dst.setdefault(dst, {})[src] = min_rtt
+
+    return rtt_per_srcs_dst
+
+
+
 def compute_geo_info(probes, serialized_file):
+    """ 
+    计算与探针相关的地理信息，包括国家、ASN、坐标等。
+    
+    参数:
+        probes: 包含探针信息的列表。
+        serialized_file: 存储距离矩阵的文件路径。
+    
+    返回:
+        包含各类地理信息的元组。
+    """
     country_per_vp_ip = {}
     asn_per_vp_ip = {}
     vp_coordinates_per_ip = {}
@@ -359,7 +437,6 @@ def compute_geo_info(probes, serialized_file):
         anchors_per_ip_address,
     )
 
-
 def compute_error(dst, vp_coordinates_per_ip, rtt_per_src):
     error = None
     circles = []
@@ -371,6 +448,21 @@ def compute_error(dst, vp_coordinates_per_ip, rtt_per_src):
         real_geolocation = vp_coordinates_per_ip[dst]
         error = haversine(guessed_geolocation, real_geolocation)
     return error, circles
+
+
+def compute_guessed_and_real_loc(dst, vp_coordinates_per_ip, rtt_per_src):
+    error = None
+    circles = []
+    guessed_geolocation_circles = select_best_guess_centroid(
+        dst, vp_coordinates_per_ip, rtt_per_src
+    )
+    if guessed_geolocation_circles is not None:
+        guessed_geolocation, circles = guessed_geolocation_circles
+        real_geolocation = vp_coordinates_per_ip[dst]
+        error = haversine(guessed_geolocation, real_geolocation)
+    else:
+        return [dst,None,None,None]
+    return [dst, error, guessed_geolocation, real_geolocation]
 
 
 def compute_error_threshold_cdfs(errors_threshold, filter_dsts=None):
@@ -449,7 +541,7 @@ def compute_remove_wrongly_geolocated_probes(
         )
     return removed_probes
 
-
+# 定义一个基于轮次的算法实现
 def round_based_algorithm_impl(
     dst,
     rtt_per_src,
@@ -458,23 +550,29 @@ def round_based_algorithm_impl(
     asn_per_vp,
     threshold,
 ):
-    # Only take the first n_vps
+    # 限制探针范围: 只选择前n个VP（测量点） 从所有探针中，选择贪婪子集内的探针。
     vp_coordinates_per_ip_allowed = {
         x: vp_coordinates_per_ip[x]
         for x in vp_coordinates_per_ip
         if x in vps_per_target_greedy
     }
-    guessed_geolocation_circles = select_best_guess_centroid(
+    # 选择最佳估计质心位置
+    guessed_geolocation_circles = select_best_guess_centroid( # 根据不同交圆数量选择计算方法
         dst, vp_coordinates_per_ip_allowed, rtt_per_src
     )
     if guessed_geolocation_circles is None:
+        # 如果没有找到合适的质心，则返回目标地址和两个None值
         return dst, None, None
+    # (-31.960499999999996, 115.79749999999999) , {(-31.9605, 115.7975, 83.570909, 8357.0909, 1.31173927169989)}
     guessed_geolocation, circles = guessed_geolocation_circles
-    # Then take one probe per AS, city in the zone
+
+
+    # 在区域内每个AS、城市选择一个探测器
     probes_in_intersection = {}
     for probe, probe_coordinates in vp_coordinates_per_ip.items():
         is_in_intersection = True
         for circle in circles:
+            # 遍历所有探针，判断是否在质心的圆形区域内：
             lat_c, long_c, rtt_c, d_c, r_c = circle
             if not is_within_cirle(
                 (lat_c, long_c), rtt_c, probe_coordinates, speed_threshold=2 / 3
@@ -484,7 +582,7 @@ def round_based_algorithm_impl(
         if is_in_intersection:
             probes_in_intersection[probe] = probe_coordinates
 
-    # Now only take one probe per AS/city in the probes in intersection
+    # 现在只在交集中的probes中 选择每个AS/城市的单个probe
     selected_probes_per_asn = {}
     for probe in probes_in_intersection:
         asn = asn_per_vp[probe]
@@ -501,37 +599,42 @@ def round_based_algorithm_impl(
                     is_already_found_close = True
                     break
             if not is_already_found_close:
-                # Add this probe to the selected as we do not already have the same probe.
+                # 添加此探测器，因为我们还没有找到相同位置的探测器
                 selected_probes_per_asn[asn].append(probe)
 
+    # 收集选定的探测器
     selected_probes = set()
     for _, probes in selected_probes_per_asn.items():
         selected_probes.update(probes)
 
+    # 更新第二层级的VP坐标信息
     vp_coordinates_per_ip_tier2 = {
         x: vp_coordinates_per_ip[x]
         for x in vp_coordinates_per_ip
         if x in selected_probes
     }
     vp_coordinates_per_ip_tier2[dst] = vp_coordinates_per_ip[dst]
-    # Now evaluate the error with this subset of probes
+    # 使用这个子集的探测器评估误差  (大幅提升精确度)
     error, circles = compute_error(dst, vp_coordinates_per_ip_tier2, rtt_per_src)
-    return dst, error, len(selected_probes)
-
+    dst_guess_loc,dst_real_loc = compute_guessed_and_real_loc(dst, vp_coordinates_per_ip_tier2, rtt_per_src) 
+    # 返回目标地址、误差和选定的探测器数量
+    return dst, error, len(selected_probes), dst_guess_loc, dst_real_loc
 
 def round_based_algorithm(
     greedy_probes, rtt_per_srcs_dst, vp_coordinates_per_ip, asn_per_vp, n_vps, threshold
 ):
     """
     First is to use a subset of greedy probes, and then take 1 probe/AS in the given CBG area
+    第一步使用VP子集,并在给定的CBG区域选择一个探针/AS
     :param greedy_probes:
     :return:
     """
-
+    # 从贪婪选择的探针中选取前n_vps个VP
     vps_per_target_greedy = set(greedy_probes[:n_vps])
 
     args = []
-    for i, (dst, rtt_per_src) in enumerate(sorted(rtt_per_srcs_dst.items())):
+    # 遍历所有源到目的地的RTT数据 ， 这个sort单纯是按照键排序，无实际作用
+    for i, (dst, rtt_per_src) in enumerate(sorted(rtt_per_srcs_dst.items())):  # (dst, rtt_per_src) => ('101.53.31.6',{'103.19.166.85': [46.279334], '37.10.41.14': [41.066416], ...})
         if dst not in vp_coordinates_per_ip:
             continue
         args.append(
@@ -545,9 +648,41 @@ def round_based_algorithm(
             )
         )
     with Pool(24) as p:
-        results = p.starmap(round_based_algorithm_impl, args)
+        results = p.starmap(round_based_algorithm_impl, args) # return dst, error, len(selected_probes)
         return results
 
+
+
+def round_based_algorithm_with_loc(
+    probes, rtt_per_srcs_dst, vp_coordinates_per_ip, asn_per_vp, threshold
+):
+    """
+    First is to use a subset of greedy probes, and then take 1 probe/AS in the given CBG area
+    第一步使用VP子集,并在给定的CBG区域选择一个探针/AS
+    :param greedy_probes:
+    :return:
+    """
+    # 从贪婪选择的探针中选取前n_vps个VP
+
+
+    args = []
+    # 遍历所有源到目的地的RTT数据 ， 这个sort单纯是按照键排序，无实际作用
+    for i, (dst, rtt_per_src) in enumerate(sorted(rtt_per_srcs_dst.items())):  # (dst, rtt_per_src) => ('101.53.31.6',{'103.19.166.85': [46.279334], '37.10.41.14': [41.066416], ...})
+        if dst not in vp_coordinates_per_ip:
+            continue
+        args.append(
+            (
+                dst,
+                rtt_per_src,
+                vp_coordinates_per_ip,
+                probes,
+                asn_per_vp,
+                threshold,
+            )
+        )
+    with Pool(24) as p:
+        results = p.starmap(round_based_algorithm_impl, args) # return dst, error, len(selected_probes)
+        return results
 
 ########## STREET LEVEL ##########
 

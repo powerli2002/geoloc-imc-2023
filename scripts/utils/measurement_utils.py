@@ -147,6 +147,9 @@ def ping_prefixes(
     )
 
     # measurement for 3 targets in every target prefixes
+    # 在每个目标前缀中，选择3个目标进行测量
+    # ping_by_prefix ：from a list of prefixes, start measurements for n target addrs in prefix
+    # 对于给定的前缀列表，从中选择n个目标地址进行测量
     ids, start_time, end_time = pinger.ping_by_prefix(
         target_prefixes=target_prefixes,
         vps=vps,

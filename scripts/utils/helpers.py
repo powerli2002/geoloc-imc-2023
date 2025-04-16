@@ -103,7 +103,6 @@ def get_points_on_circle(lat_c, lon_c, r_c, nb_points: int = 4):
 
     return circle_points
 
-
 def circle_intersections(circles, speed_threshold=None):
     """
     Check out this link for more details about the maths:
@@ -243,8 +242,12 @@ def get_middle_intersection(intersections):
 
 def select_best_guess_centroid(target_ip, vp_coordinates_per_ip, rtt_per_vp_to_target):
     """
-    Find the best guess
-    that is the location of the vantage point closest to the centroid.
+    找到最佳猜测的位置，即离质心最近的观测点位置。
+
+    :param target_ip: 目标的IP地址。
+    :param vp_coordinates_per_ip: 观测点IP地址到其地理坐标的字典映射。
+    :param rtt_per_vp_to_target: 观测点IP地址到其到目标的RTT（往返时间）的字典映射。
+    :return: 包含估计质心坐标及一系列探测圆的元组。
     """
     probe_circles = {}
     closest_vp = None
@@ -255,11 +258,13 @@ def select_best_guess_centroid(target_ip, vp_coordinates_per_ip, rtt_per_vp_to_t
         if vp_ip not in vp_coordinates_per_ip:
             continue
         lat, lon = vp_coordinates_per_ip[vp_ip]
-        min_rtt = min(rtts)
+        if isinstance(rtts,float):
+            min_rtt = rtts
+        else:
+            min_rtt = min(rtts)
         if min_rtt > 100:
             continue
         min_rtt_per_vp_ip[vp_ip] = min_rtt
-        # too inflated RTT means that measurement will not provide useful info
 
         if isinstance(min_rtt, float):
             probe_circles[vp_ip] = (
@@ -269,21 +274,20 @@ def select_best_guess_centroid(target_ip, vp_coordinates_per_ip, rtt_per_vp_to_t
                 None,
                 None,
             )
-            # print(f"vp_anchor = {vp_ip} with results: {min_rtt}")
-    # print()
 
-    # draw circles
+    # 绘制圆圈，所有的圆都
     if not probe_circles:
         return None
     circles = list(probe_circles.values())
     intersections, circles = circle_intersections(circles, speed_threshold=2/3)
+    
     if len(intersections) > 2:
         centroid = polygon_centroid(intersections)
     elif len(intersections) == 2:
-        # only two circles intersection, centroid is middle of the segment
+        # 只有两个圆相交，质心为线段中点
         centroid = get_middle_intersection(intersections)
     else:
-        # only one circle so take the closest vp as the centroid
+        # 只有一个圆，取距离最近的观测点作为质心
         closest_vp, _ = min(min_rtt_per_vp_ip.items(), key=lambda x: x[1])
         centroid = vp_coordinates_per_ip[closest_vp]
 

@@ -11,6 +11,9 @@ from random import randint
 
 from logger import logger
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 class RIPEAtlas(object):
     def __init__(
@@ -343,25 +346,73 @@ def get_measurements_from_tag(tag: str) -> dict:
     return response
 
 
-def get_from_atlas(url: str):
-    """get request url atlas endpoint"""
-    response = requests.get(url).json()
-    while True:
-        for anchor in response["results"]:
-            yield anchor
+# def get_from_atlas(url: str):
+#     """get request url atlas endpoint"""
+#     response = requests.get(url).json()
+#     while True:
+#         for anchor in response["results"]:
+#             yield anchor
 
-        if response["next"]:
-            response = requests.get(response["next"]).json()
-        else:
+#         if response["next"]:
+#             response = requests.get(response["next"]).json()
+#         else:
+#             break
+def get_from_atlas(url: str):
+    session = requests.Session()
+
+    # 定义重试策略
+    retry_strategy = Retry(
+        total=3,  # 总共尝试多少次（包括第一次请求）
+        backoff_factor=1,  # 重试间隔时间因子
+        status_forcelist=[429, 500, 502, 503, 504],  # 遇到这些状态码时重试
+        allowed_methods=["GET"],  # 只对GET方法重试
+    )
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    failed_urls = []
+    while True:
+        try:
+            response = session.get(url, timeout=50)  # 设置请求超时时间为10秒
+            data = response.json()
+            for anchor in data["results"]:
+                yield anchor
+
+            if data["next"]:
+                url = data["next"]
+            else:
+                break
+        except requests.exceptions.RequestException as e:
+            # 记录失败的URL
+            failed_urls.append(url)
+            print(f"Failed to retrieve data from {url}: {e}")
             break
 
+    # 最后一次重试所有失败的URL
+    if failed_urls:
+        for failed_url in failed_urls:
+            try:
+                response = session.get(failed_url, timeout=10)
+                data = response.json()
+                for anchor in data["results"]:
+                    yield anchor
+
+                if data["next"]:
+                    url = data["next"]
+                else:
+                    break
+            except requests.exceptions.RequestException as e:
+                print(f"Final attempt to retrieve data from {failed_url} failed: {e}")
 
 def get_atlas_probes() -> list:
     """return all connected atlas probes"""
     probes = []
     rejected = 0
     geoloc_disputed = 0
-    for _, probe in enumerate(get_from_atlas("https://atlas.ripe.net/api/v2/probes/")):
+    all_probes = get_from_atlas("https://atlas.ripe.net/api/v2/probes/")
+    for _, probe in enumerate(all_probes):
         # filter probes based on generic criteria
         if not probe["is_anchor"]:
             if (
@@ -394,7 +445,8 @@ def get_atlas_anchors() -> list:
     anchors = []
     rejected = 0
     geoloc_disputed = 0
-    for _, anchor in enumerate(get_from_atlas("https://atlas.ripe.net/api/v2/probes/")):
+    all_anchors = get_from_atlas("https://atlas.ripe.net/api/v2/anchors/")
+    for _, anchor in enumerate(all_anchors):
         # filter anchors based on generic criteria
         if anchor["is_anchor"]:
             if (
